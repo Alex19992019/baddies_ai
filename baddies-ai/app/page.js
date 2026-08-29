@@ -605,13 +605,21 @@ export default function DressUpApp() {
     setPreviewUrl(null);
   }
 
-  // One button, works everywhere: uses the native share sheet (which has a
-  // real "Save Image" action) whenever the browser supports sharing files —
-  // that covers iPhone and modern Android alike. Only falls back to a plain
-  // anchor download for browsers without file sharing (mainly desktop).
+  // iOS Safari ignores the <a download> attribute, so navigator.share() (with
+  // its "Save Image" action) is the only thing that actually saves a file
+  // there. Android's share sheet, by contrast, is just a list of apps with no
+  // equivalent direct "save" action — and its plain download link already
+  // works fine — so routing Android through share() only adds a confusing
+  // extra step. Feature detection alone can't tell the two apart (navigator
+  // .share exists on both), so this checks the platform directly.
+  function isIOS() {
+    if (typeof navigator === "undefined") return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
   async function handleSaveImage() {
     const file = shareFileRef.current;
-    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (isIOS() && file && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: "Mi personaje Baddies AI" });
         return;
