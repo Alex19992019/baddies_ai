@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Download, ChevronLeft, ChevronRight, RotateCcw, Dices } from "lucide-react";
+import { Download, ChevronLeft, ChevronRight, RotateCcw, Dices, Info } from "lucide-react";
 
 const LOGO_SRC = "/images/logo.png";
 const SLOGAN_SRC = "/images/slogan.png";
@@ -343,6 +343,7 @@ const DEFAULT_SELECTIONS = {
 export default function DressUpApp() {
   const [selections, setSelections] = useState(DEFAULT_SELECTIONS);
   const [activeCategory, setActiveCategory] = useState("hair");
+  const [showCredits, setShowCredits] = useState(false);
   const canvasRef = useRef(null);
   const avatarImgRef = useRef(null);
   const hairCanvasRef = useRef(null);
@@ -914,8 +915,59 @@ export default function DressUpApp() {
           >
             <Dices className="w-5 h-5 text-[#0A0A0A]" strokeWidth={2.5} />
           </button>
+          <button
+            onClick={() => setShowCredits(true)}
+            title="Créditos"
+            aria-label="Créditos"
+            className="w-6 h-6 rounded-full bg-white border border-[#0A0A0A] flex items-center justify-center active:opacity-70 shadow self-center"
+          >
+            <Info className="w-3.5 h-3.5 text-[#0A0A0A]" strokeWidth={2.5} />
+          </button>
         </div>
       </div>
+
+      {showCredits && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          onClick={() => setShowCredits(false)}
+        >
+          <div
+            className="bg-white rounded-lg p-5 max-w-xs w-full text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm text-[#0A0A0A] mb-4">
+              Arte y Assets de pixel art hechos por:{" "}
+              <a
+                href="https://www.instagram.com/ardbujitos?igsi=MTRsbmwyYW51cTZuZQ=="
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold"
+                style={{ color: "#FF2E93" }}
+              >
+                @ardbujitos
+              </a>
+            </p>
+            <p className="text-sm text-[#0A0A0A] mb-5">
+              Página de nuestra comunidad:{" "}
+              <a
+                href="https://www.instagram.com/baddies.ai?igsi=MjRza2RrMGZsazhp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold"
+                style={{ color: "#FF2E93" }}
+              >
+                @baddies.ai
+              </a>
+            </p>
+            <button
+              onClick={() => setShowCredits(false)}
+              className="px-5 py-2 bg-[#0A0A0A] text-white rounded-full text-xs font-mono uppercase tracking-wide"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
 
       {previewUrl && (
         <div
