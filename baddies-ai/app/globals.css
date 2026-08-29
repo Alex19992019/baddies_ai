@@ -5,4 +5,8 @@
 html, body {
   margin: 0;
   padding: 0;
+  /* Force light rendering: without this, Android's "forced dark theme" (Chrome/
+     Samsung Internet) and iOS dark mode can repaint unstyled surfaces and text,
+     which is what was making the polaroid card and labels look dark/unreadable. */
+  color-scheme: light;
 }
