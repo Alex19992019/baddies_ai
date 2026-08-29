@@ -65,6 +65,9 @@ const HAIR_SOURCES = {
   hair4: "/images/hair/hair3.png",
   hair5: "/images/hair/hair4.png",
   hair6: "/images/hair/hair5.png",
+  hair7: "/images/hair/hair7.png",
+  hair8: "/images/hair/hair8.png",
+  hair9: "/images/hair/hair9.png",
 };
 
 const HAIR_STYLES = [
