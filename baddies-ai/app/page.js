@@ -77,6 +77,9 @@ const HAIR_STYLES = [
   { id: "hair4", label: "Estilo 4" },
   { id: "hair5", label: "Estilo 5" },
   { id: "hair6", label: "Estilo 6" },
+  { id: "hair7", label: "Estilo 7" },
+  { id: "hair8", label: "Estilo 8" },
+  { id: "hair9", label: "Estilo 9" },
 ];
 
 const MOUTH_STYLES = [
