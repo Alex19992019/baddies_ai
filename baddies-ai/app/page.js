@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Download } from "lucide-react";
+import { Download, ChevronLeft, ChevronRight, RotateCcw, Dices } from "lucide-react";
 
 const LOGO_SRC = "/images/logo.png";
 const SLOGAN_SRC = "/images/slogan.png";
@@ -313,15 +313,21 @@ function TabButton({ cat, active, onSelect }) {
   );
 }
 
+function randomItem(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const DEFAULT_SELECTIONS = {
+  hair: { style: "hair6", color: HAIR_COLORS[0] },
+  mouth: { style: "mouth2", color: LIP_COLORS[0] },
+  eyes: { style: "eye1", color: EYE_COLORS[0] },
+  shirt: { color: SHIRT_COLORS[0] },
+  skin: { color: SKIN_COLORS[2] },
+  background: { id: "bg2" },
+};
+
 export default function DressUpApp() {
-  const [selections, setSelections] = useState({
-    hair: { style: "hair6", color: HAIR_COLORS[0] },
-    mouth: { style: "mouth2", color: LIP_COLORS[0] },
-    eyes: { style: "eye1", color: EYE_COLORS[0] },
-    shirt: { color: SHIRT_COLORS[0] },
-    skin: { color: SKIN_COLORS[2] },
-    background: { id: "bg2" },
-  });
+  const [selections, setSelections] = useState(DEFAULT_SELECTIONS);
   const [activeCategory, setActiveCategory] = useState("hair");
   const canvasRef = useRef(null);
   const avatarImgRef = useRef(null);
@@ -339,21 +345,28 @@ export default function DressUpApp() {
   const sloganImgRef = useRef(null);
 
   const [charms, setCharms] = useState([]);
-  const [activeDrag, setActiveDrag] = useState(null); // { type: 'new', charmId } | { type: 'move', uid }
-  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [activeDrag, setActiveDrag] = useState(null); // { type: 'move' | 'resize' | 'rotate', uid }
   const [selectedCharmUid, setSelectedCharmUid] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [canShare, setCanShare] = useState(false);
+  const charmsTrayRef = useRef(null);
+  const shareFileRef = useRef(null);
 
   const BASE_CHARM_PX = 44;
+
+  useEffect(() => {
+    setCanShare(typeof navigator !== "undefined" && !!navigator.share);
+  }, []);
 
   useEffect(() => {
     if (!activeDrag) return;
     function onMove(e) {
       if (activeDrag.type === "move" && polaroidRef.current) {
         const rect = polaroidRef.current.getBoundingClientRect();
-        const xPct = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100));
-        const yPct = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100));
+        const bounds = getPhotoBoundsPct();
+        const xPct = Math.min(bounds.xMax, Math.max(bounds.xMin, ((e.clientX - rect.left) / rect.width) * 100));
+        const yPct = Math.min(bounds.yMax, Math.max(bounds.yMin, ((e.clientY - rect.top) / rect.height) * 100));
         setCharms((cs) => cs.map((c) => (c.uid === activeDrag.uid ? { ...c, xPct, yPct } : c)));
       } else if (activeDrag.type === "resize" && polaroidRef.current) {
         const rect = polaroidRef.current.getBoundingClientRect();
@@ -372,20 +385,9 @@ export default function DressUpApp() {
         const centerY = rect.top + (charm.yPct / 100) * rect.height;
         const angleDeg = (Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180) / Math.PI;
         setCharms((cs) => cs.map((c) => (c.uid === activeDrag.uid ? { ...c, rotation: angleDeg } : c)));
-      } else {
-        setDragPos({ x: e.clientX, y: e.clientY });
       }
     }
-    function onUp(e) {
-      if (activeDrag.type === "new" && polaroidRef.current) {
-        const rect = polaroidRef.current.getBoundingClientRect();
-        const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
-        if (inside) {
-          const xPct = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100));
-          const yPct = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100));
-          setCharms((cs) => [...cs, { uid: "c" + Date.now() + Math.random(), charmId: activeDrag.charmId, xPct, yPct, scale: 1, rotation: 0 }]);
-        }
-      }
+    function onUp() {
       setActiveDrag(null);
     }
     window.addEventListener("pointermove", onMove);
@@ -396,10 +398,30 @@ export default function DressUpApp() {
     };
   }, [activeDrag, charms]);
 
-  function startNewCharmDrag(e, charmId) {
-    e.preventDefault();
-    setDragPos({ x: e.clientX, y: e.clientY });
-    setActiveDrag({ type: "new", charmId });
+  // Keeps charms confined to the photo itself, so they never land on top of
+  // the logo above it or the caption below it.
+  function getPhotoBoundsPct() {
+    if (!polaroidRef.current || !photoBoxRef.current) return { xMin: 3, xMax: 97, yMin: 3, yMax: 97 };
+    const cardRect = polaroidRef.current.getBoundingClientRect();
+    const photoRect = photoBoxRef.current.getBoundingClientRect();
+    const pad = 4; // small inset so a charm doesn't hug the photo's own edge
+    return {
+      xMin: ((photoRect.left - cardRect.left) / cardRect.width) * 100 + pad,
+      xMax: ((photoRect.right - cardRect.left) / cardRect.width) * 100 - pad,
+      yMin: ((photoRect.top - cardRect.top) / cardRect.height) * 100 + pad,
+      yMax: ((photoRect.bottom - cardRect.top) / cardRect.height) * 100 - pad,
+    };
+  }
+  function addCharmAtCenter(charmId) {
+    const bounds = getPhotoBoundsPct();
+    const uid = "c" + Date.now() + Math.random();
+    const xPct = (bounds.xMin + bounds.xMax) / 2;
+    const yPct = (bounds.yMin + bounds.yMax) / 2;
+    setCharms((cs) => [...cs, { uid, charmId, xPct, yPct, scale: 1, rotation: 0 }]);
+    setSelectedCharmUid(uid);
+  }
+  function scrollCharmsTray(dir) {
+    charmsTrayRef.current?.scrollBy({ left: dir * 160, behavior: "smooth" });
   }
   function startMoveCharm(e, uid) {
     e.preventDefault();
@@ -445,6 +467,21 @@ export default function DressUpApp() {
   }
   function updateBackground(bgId) {
     setSelections((s) => ({ ...s, background: { id: bgId } }));
+  }
+  function handleReset() {
+    setSelections(DEFAULT_SELECTIONS);
+    setCharms([]);
+    setSelectedCharmUid(null);
+  }
+  function handleRandom() {
+    setSelections({
+      hair: { style: randomItem(HAIR_STYLES).id, color: randomItem(HAIR_COLORS) },
+      eyes: { style: randomItem(EYE_STYLES).id, color: randomItem(EYE_COLORS) },
+      mouth: { style: randomItem(MOUTH_STYLES).id, color: randomItem(LIP_COLORS) },
+      shirt: { color: randomItem(SHIRT_COLORS) },
+      skin: { color: randomItem(SKIN_COLORS) },
+      background: { id: randomItem(BACKGROUNDS).id },
+    });
   }
 
   async function handleDownload() {
@@ -519,39 +556,35 @@ export default function DressUpApp() {
 
     const dataUrl = exportCanvas.toDataURL("image/png");
 
-    // Best mobile UX: native share sheet, which has a real "Save Image" option.
-    if (navigator.share && navigator.canShare) {
-      try {
-        const blob = await (await fetch(dataUrl)).blob();
-        const file = new File([blob], "mi-polaroid-baddies-ai.png", { type: "image/png" });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: "Mi personaje Baddies AI" });
-          return;
-        }
-      } catch (shareErr) {
-        // cancelled or unsupported — fall through to the other methods below
-      }
-    }
-
-    // Try a normal download click too (works in most desktop browsers).
+    // Build the shareable file once, up front, so the "Compartir" button in the
+    // preview below can use it instantly instead of triggering the OS share
+    // sheet before the person has even seen the result.
     try {
-      const link = document.createElement("a");
-      link.download = "mi-polaroid-baddies-ai.png";
-      link.href = dataUrl;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (linkErr) {
-      // ignore — the preview below always works regardless
+      const blob = await (await fetch(dataUrl)).blob();
+      shareFileRef.current = new File([blob], "mi-polaroid-baddies-ai.png", { type: "image/png" });
+    } catch (blobErr) {
+      shareFileRef.current = null;
     }
 
-    // Always show a preview too: on some mobile browsers a programmatic download
-    // silently does nothing, but a long-press-to-save on a plain <img> always works.
+    // Show the preview first, every time: it always works (long-press to save
+    // on mobile, right-click on desktop), and both "Compartir" and "Descargar"
+    // are offered from inside it as explicit choices.
     setPreviewUrl(dataUrl);
     } catch (err) {
       console.error("No se pudo generar la imagen:", err);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleShare() {
+    if (!shareFileRef.current) return;
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [shareFileRef.current] })) {
+        await navigator.share({ files: [shareFileRef.current], title: "Mi personaje Baddies AI" });
+      }
+    } catch (shareErr) {
+      // cancelled — nothing to do
     }
   }
 
@@ -688,28 +721,34 @@ export default function DressUpApp() {
             })()}
         </div>
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex items-center gap-1.5">
           <span className="text-[9px] font-mono uppercase tracking-wide text-[#7A5A6A] shrink-0">Charms:</span>
-          <div className="flex gap-2 overflow-x-auto">
+          <button
+            onClick={() => scrollCharmsTray(-1)}
+            aria-label="Ver charms anteriores"
+            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70"
+          >
+            <ChevronLeft className="w-3.5 h-3.5 text-[#0A0A0A]" strokeWidth={3} />
+          </button>
+          <div ref={charmsTrayRef} className="flex gap-2 overflow-x-auto scroll-smooth">
             {CHARM_DEFS.map((def) => (
               <button
                 key={def.id}
-                onPointerDown={(e) => startNewCharmDrag(e, def.id)}
-                className="w-12 h-12 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center touch-none cursor-grab active:cursor-grabbing overflow-hidden"
+                onClick={() => addCharmAtCenter(def.id)}
+                className="w-12 h-12 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center overflow-hidden active:opacity-70"
               >
                 <img src={def.src} alt={def.id} className="w-9 h-9 pointer-events-none object-contain" draggable={false} />
               </button>
             ))}
           </div>
+          <button
+            onClick={() => scrollCharmsTray(1)}
+            aria-label="Ver más charms"
+            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70"
+          >
+            <ChevronRight className="w-3.5 h-3.5 text-[#0A0A0A]" strokeWidth={3} />
+          </button>
         </div>
-
-        {activeDrag?.type === "new" && (
-          <img
-            src={CHARM_DEFS.find((c) => c.id === activeDrag.charmId)?.src}
-            className="fixed w-11 h-11 pointer-events-none z-50 -translate-x-1/2 -translate-y-1/2 opacity-80"
-            style={{ left: dragPos.x, top: dragPos.y }}
-          />
-        )}
 
         {/* Habbo-style editor window: tabs + content panel, always visible, no popup */}
         <div
@@ -800,17 +839,31 @@ export default function DressUpApp() {
           </div>
         </div>
 
-        <div className="flex justify-end mt-3">
+        <div className="flex items-center justify-center gap-4 mt-4">
+          <button
+            onClick={handleReset}
+            title="Reiniciar personaje"
+            className="w-11 h-11 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70 shadow"
+          >
+            <RotateCcw className="w-5 h-5 text-[#0A0A0A]" strokeWidth={2.5} />
+          </button>
           <button
             onClick={handleDownload}
             disabled={downloading}
-            className="w-12 h-12 rounded-full bg-[#FF2E93] flex items-center justify-center active:opacity-80 shadow-lg disabled:opacity-60"
+            className="w-14 h-14 rounded-full bg-[#FF2E93] flex items-center justify-center active:opacity-80 shadow-lg disabled:opacity-60"
           >
             {downloading ? (
               <span className="w-4 h-4 border-2 border-[#0A0A0A] border-t-transparent rounded-full animate-spin" />
             ) : (
               <Download className="w-5 h-5 text-[#0A0A0A]" strokeWidth={2.5} />
             )}
+          </button>
+          <button
+            onClick={handleRandom}
+            title="Personaje aleatorio"
+            className="w-11 h-11 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70 shadow"
+          >
+            <Dices className="w-5 h-5 text-[#0A0A0A]" strokeWidth={2.5} />
           </button>
         </div>
       </div>
@@ -826,15 +879,32 @@ export default function DressUpApp() {
           <img
             src={previewUrl}
             alt="Tu polaroid"
-            className="max-w-full max-h-[70vh] rounded-lg shadow-2xl"
+            className="max-w-full max-h-[62vh] rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
-          <button
-            onClick={() => setPreviewUrl(null)}
-            className="mt-4 px-5 py-2 bg-white rounded-full text-xs font-mono uppercase tracking-wide"
-          >
-            Cerrar
-          </button>
+          <div className="flex gap-2.5 mt-4" onClick={(e) => e.stopPropagation()}>
+            {canShare && (
+              <button
+                onClick={handleShare}
+                className="px-4 py-2 bg-[#FF2E93] rounded-full text-xs font-mono uppercase tracking-wide text-white"
+              >
+                Compartir
+              </button>
+            )}
+            <a
+              href={previewUrl}
+              download="mi-polaroid-baddies-ai.png"
+              className="px-4 py-2 bg-white rounded-full text-xs font-mono uppercase tracking-wide"
+            >
+              Descargar
+            </a>
+            <button
+              onClick={() => setPreviewUrl(null)}
+              className="px-4 py-2 bg-white/15 text-white rounded-full text-xs font-mono uppercase tracking-wide"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
       )}
 
