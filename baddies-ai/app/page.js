@@ -259,6 +259,20 @@ function loadImage(src) {
   });
 }
 
+// Converts a data: URL into a Blob synchronously, with no fetch() call and no
+// async callback to wait on. fetch()-ing a data: URL is what silently failed
+// on iOS Safari; canvas.toBlob()'s callback is what silently never fired on
+// some Android builds. This has neither failure mode.
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(",");
+  const mimeMatch = /data:([^;]+);base64/.exec(header || "");
+  const mime = mimeMatch ? mimeMatch[1] : "image/png";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 function drawCover(ctx, img, W, H) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
@@ -349,16 +363,11 @@ export default function DressUpApp() {
   const [selectedCharmUid, setSelectedCharmUid] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [canShare, setCanShare] = useState(false);
   const [trayEdge, setTrayEdge] = useState({ start: true, end: false });
   const charmsTrayRef = useRef(null);
   const shareFileRef = useRef(null);
 
   const BASE_CHARM_PX = 44;
-
-  useEffect(() => {
-    setCanShare(typeof navigator !== "undefined" && !!navigator.share);
-  }, []);
 
   // Tracks whether the charm tray is scrolled all the way to either end, so
   // the arrow buttons can disable themselves there instead of letting taps
@@ -579,21 +588,12 @@ export default function DressUpApp() {
       ectx.restore();
     });
 
-    // toBlob() instead of toDataURL()+fetch(): Safari on iOS can fail (or
-    // silently produce nothing) when fetch()-ing a large data: URL, which was
-    // why "Compartir" and "Descargar" were both dead ends there. toBlob()
-    // avoids that round trip entirely and works the same on every platform.
-    const blob = await new Promise((resolve) => exportCanvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("No se pudo generar el PNG");
+    const dataUrl = exportCanvas.toDataURL("image/png");
+    shareFileRef.current = new File([dataUrlToBlob(dataUrl)], "mi-polaroid-baddies-ai.png", { type: "image/png" });
 
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const objectUrl = URL.createObjectURL(blob);
-    shareFileRef.current = new File([blob], "mi-polaroid-baddies-ai.png", { type: "image/png" });
-
-    // Show the preview first, every time: it always works (long-press to save
-    // on mobile, right-click on desktop), and "Compartir"/"Descargar" are
-    // offered from inside it as explicit choices.
-    setPreviewUrl(objectUrl);
+    // Show the preview first, every time — the "Descargar" button below
+    // handles both iPhone and Android from a single tap.
+    setPreviewUrl(dataUrl);
     } catch (err) {
       console.error("No se pudo generar la imagen:", err);
     } finally {
@@ -602,19 +602,29 @@ export default function DressUpApp() {
   }
 
   function closePreview() {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
   }
 
-  async function handleShare() {
-    if (!shareFileRef.current) return;
-    try {
-      if (navigator.canShare && navigator.canShare({ files: [shareFileRef.current] })) {
-        await navigator.share({ files: [shareFileRef.current], title: "Mi personaje Baddies AI" });
+  // One button, works everywhere: uses the native share sheet (which has a
+  // real "Save Image" action) whenever the browser supports sharing files —
+  // that covers iPhone and modern Android alike. Only falls back to a plain
+  // anchor download for browsers without file sharing (mainly desktop).
+  async function handleSaveImage() {
+    const file = shareFileRef.current;
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Mi personaje Baddies AI" });
+        return;
+      } catch (shareErr) {
+        // cancelled or failed — fall through to the manual download below
       }
-    } catch (shareErr) {
-      // cancelled — nothing to do
     }
+    const link = document.createElement("a");
+    link.href = previewUrl;
+    link.download = "mi-polaroid-baddies-ai.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   return (
@@ -904,34 +914,25 @@ export default function DressUpApp() {
           className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-6"
           onClick={closePreview}
         >
-          <p className="text-white text-xs font-mono text-center mb-3 uppercase tracking-wide">
-            Mantén presionada la imagen para guardarla
-          </p>
           <img
             src={previewUrl}
             alt="Tu polaroid"
             className="max-w-full max-h-[62vh] rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
+          <p className="text-white text-xs text-center mt-4 max-w-[280px]">
+            No te olvides de compartir tu baddie etiquetándonos en nuestro insta: @baddies.ai 💗
+          </p>
           <div className="flex gap-2.5 mt-4" onClick={(e) => e.stopPropagation()}>
-            {canShare && (
-              <button
-                onClick={handleShare}
-                className="px-4 py-2 bg-[#FF2E93] rounded-full text-xs font-mono uppercase tracking-wide text-white"
-              >
-                Compartir
-              </button>
-            )}
-            <a
-              href={previewUrl}
-              download="mi-polaroid-baddies-ai.png"
-              className="px-4 py-2 bg-white rounded-full text-xs font-mono uppercase tracking-wide"
+            <button
+              onClick={handleSaveImage}
+              className="px-5 py-2 bg-[#FF2E93] rounded-full text-xs font-mono uppercase tracking-wide text-white"
             >
               Descargar
-            </a>
+            </button>
             <button
               onClick={closePreview}
-              className="px-4 py-2 bg-white/15 text-white rounded-full text-xs font-mono uppercase tracking-wide"
+              className="px-5 py-2 bg-white/15 text-white rounded-full text-xs font-mono uppercase tracking-wide"
             >
               Cerrar
             </button>
