@@ -350,6 +350,7 @@ export default function DressUpApp() {
   const [downloading, setDownloading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [canShare, setCanShare] = useState(false);
+  const [trayEdge, setTrayEdge] = useState({ start: true, end: false });
   const charmsTrayRef = useRef(null);
   const shareFileRef = useRef(null);
 
@@ -357,6 +358,26 @@ export default function DressUpApp() {
 
   useEffect(() => {
     setCanShare(typeof navigator !== "undefined" && !!navigator.share);
+  }, []);
+
+  // Tracks whether the charm tray is scrolled all the way to either end, so
+  // the arrow buttons can disable themselves there instead of letting taps
+  // keep requesting scroll past the real content (which is what caused the
+  // stuck-on-empty-space bug on iOS).
+  useEffect(() => {
+    const el = charmsTrayRef.current;
+    if (!el) return;
+    function updateEdge() {
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      setTrayEdge({ start: el.scrollLeft <= 2, end: el.scrollLeft >= maxScroll - 2 });
+    }
+    updateEdge();
+    el.addEventListener("scroll", updateEdge, { passive: true });
+    window.addEventListener("resize", updateEdge);
+    return () => {
+      el.removeEventListener("scroll", updateEdge);
+      window.removeEventListener("resize", updateEdge);
+    };
   }, []);
 
   useEffect(() => {
@@ -421,7 +442,11 @@ export default function DressUpApp() {
     setSelectedCharmUid(uid);
   }
   function scrollCharmsTray(dir) {
-    charmsTrayRef.current?.scrollBy({ left: dir * 160, behavior: "smooth" });
+    const el = charmsTrayRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    const target = Math.min(maxScroll, Math.max(0, el.scrollLeft + dir * 160));
+    el.scrollTo({ left: target, behavior: "smooth" });
   }
   function startMoveCharm(e, uid) {
     e.preventDefault();
@@ -554,27 +579,31 @@ export default function DressUpApp() {
       ectx.restore();
     });
 
-    const dataUrl = exportCanvas.toDataURL("image/png");
+    // toBlob() instead of toDataURL()+fetch(): Safari on iOS can fail (or
+    // silently produce nothing) when fetch()-ing a large data: URL, which was
+    // why "Compartir" and "Descargar" were both dead ends there. toBlob()
+    // avoids that round trip entirely and works the same on every platform.
+    const blob = await new Promise((resolve) => exportCanvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("No se pudo generar el PNG");
 
-    // Build the shareable file once, up front, so the "Compartir" button in the
-    // preview below can use it instantly instead of triggering the OS share
-    // sheet before the person has even seen the result.
-    try {
-      const blob = await (await fetch(dataUrl)).blob();
-      shareFileRef.current = new File([blob], "mi-polaroid-baddies-ai.png", { type: "image/png" });
-    } catch (blobErr) {
-      shareFileRef.current = null;
-    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const objectUrl = URL.createObjectURL(blob);
+    shareFileRef.current = new File([blob], "mi-polaroid-baddies-ai.png", { type: "image/png" });
 
     // Show the preview first, every time: it always works (long-press to save
-    // on mobile, right-click on desktop), and both "Compartir" and "Descargar"
-    // are offered from inside it as explicit choices.
-    setPreviewUrl(dataUrl);
+    // on mobile, right-click on desktop), and "Compartir"/"Descargar" are
+    // offered from inside it as explicit choices.
+    setPreviewUrl(objectUrl);
     } catch (err) {
       console.error("No se pudo generar la imagen:", err);
     } finally {
       setDownloading(false);
     }
+  }
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
   }
 
   async function handleShare() {
@@ -725,8 +754,9 @@ export default function DressUpApp() {
           <span className="text-[9px] font-mono uppercase tracking-wide text-[#7A5A6A] shrink-0">Charms:</span>
           <button
             onClick={() => scrollCharmsTray(-1)}
+            disabled={trayEdge.start}
             aria-label="Ver charms anteriores"
-            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70"
+            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center disabled:opacity-30"
           >
             <ChevronLeft className="w-3.5 h-3.5 text-[#0A0A0A]" strokeWidth={3} />
           </button>
@@ -743,8 +773,9 @@ export default function DressUpApp() {
           </div>
           <button
             onClick={() => scrollCharmsTray(1)}
+            disabled={trayEdge.end}
             aria-label="Ver más charms"
-            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center active:opacity-70"
+            className="w-6 h-6 shrink-0 rounded-full bg-white border-2 border-[#0A0A0A] flex items-center justify-center disabled:opacity-30"
           >
             <ChevronRight className="w-3.5 h-3.5 text-[#0A0A0A]" strokeWidth={3} />
           </button>
@@ -871,7 +902,7 @@ export default function DressUpApp() {
       {previewUrl && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-6"
-          onClick={() => setPreviewUrl(null)}
+          onClick={closePreview}
         >
           <p className="text-white text-xs font-mono text-center mb-3 uppercase tracking-wide">
             Mantén presionada la imagen para guardarla
@@ -899,7 +930,7 @@ export default function DressUpApp() {
               Descargar
             </a>
             <button
-              onClick={() => setPreviewUrl(null)}
+              onClick={closePreview}
               className="px-4 py-2 bg-white/15 text-white rounded-full text-xs font-mono uppercase tracking-wide"
             >
               Cerrar
